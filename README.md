@@ -113,23 +113,33 @@ The API is live at **http://localhost:3000**. Interactive Swagger docs are at **
 ## Architecture
 
 ```
-src/
-├── app.ts              # Fastify app factory (plugins, routes)
-├── server.ts           # Entry point — calls app factory, starts listening
-├── lib/
-│   └── prisma.ts       # Prisma singleton (shared across routes and tests)
-├── routes/
-│   ├── users.routes.ts # User CRUD handlers
-│   ├── teams.routes.ts # Team + membership handlers
-│   └── notes.routes.ts # Note CRUD + OCC update handler
-└── schemas/
-    ├── user.schemas.ts # Zod request schemas for Users
-    ├── team.schemas.ts # Zod request schemas for Teams
-    └── note.schemas.ts # Zod request schemas for Notes
-tests/
-├── users.test.ts       # User endpoint integration tests
-├── teams.test.ts       # Team endpoint integration tests
-└── notes.test.ts       # Note CRUD + OCC integration tests
+├── .github/
+│   └── workflows/
+│       └── ci.yml      # Automated GitHub Actions CI pipeline
+├── prisma/
+│   ├── schema.prisma   # Declarative relational schema
+│   ├── seed.ts         # Idempotent demo database seed script
+│   └── migrations/     # Versioned SQL migration files
+├── src/
+│   ├── app.ts          # Fastify app factory (plugins, routes)
+│   ├── server.ts       # Entry point with graceful shutdown (SIGINT/SIGTERM)
+│   ├── lib/
+│   │   └── prisma.ts   # Prisma singleton client
+│   ├── routes/
+│   │   ├── users.routes.ts # User CRUD handlers
+│   │   ├── teams.routes.ts # Team + membership handlers
+│   │   └── notes.routes.ts # Note CRUD, search, pagination & OCC handlers
+│   └── schemas/
+│       ├── user.schemas.ts # Zod request schemas for Users
+│       ├── team.schemas.ts # Zod request schemas for Teams
+│       └── note.schemas.ts # Zod request schemas for Notes
+├── tests/
+│   ├── users.test.ts   # User endpoint integration tests
+│   ├── teams.test.ts   # Team endpoint integration tests
+│   └── notes.test.ts   # Note CRUD, search, pagination & OCC tests
+├── Dockerfile          # Multi-stage production container build
+├── docker-compose.yml  # Multi-container orchestration (PostgreSQL + API)
+└── docker-entrypoint.sh# Container startup migration runner
 ```
 
 **Key structural decisions:**
@@ -142,27 +152,56 @@ tests/
 
 ## Design Tradeoffs
 
-### Optimistic Concurrency Control (OCC)
+### Optimistic Concurrency Control (OCC) & Atomic Transactions
 
-The `PUT /notes/:id` endpoint requires the client to send the note's current `version` number. The update is executed as a single atomic SQL statement:
+The `PUT /notes/:id` endpoint requires the client to provide the note's current `version` number. To prevent race conditions and lost updates without holding pessimistic database locks, the update and its revision snapshot are executed inside an atomic Prisma transaction (`prisma.$transaction`):
 
-```sql
-UPDATE notes
-SET title = COALESCE($1, title), content = COALESCE($2, content),
-    version = version + 1, updated_at = CURRENT_TIMESTAMP
-WHERE id = $3 AND version = $4
-RETURNING ...;
+```ts
+const updateResult = await prisma.$transaction(async (tx) => {
+  // 1. Atomic conditional update — only affects rows matching the expected version
+  const updatedCount = await tx.note.updateMany({
+    where: { id, version },
+    data: {
+      ...(title !== undefined && { title }),
+      ...(content !== undefined && { content }),
+      ...(tags !== undefined && { tags }),
+      version: { increment: 1 },
+    },
+  });
+
+  if (updatedCount.count === 0) {
+    return null; // Concurrent modification occurred (version mismatch)
+  }
+
+  // 2. Snapshot the prior state into note_revisions
+  await tx.noteRevision.create({
+    data: {
+      noteId: id,
+      version: currentNote.version,
+      title: currentNote.title,
+      content: currentNote.content,
+      tags: currentNote.tags,
+      editorId: editorId || currentNote.authorId,
+    },
+  });
+
+  // 3. Return the refreshed note
+  return tx.note.findUniqueOrThrow({
+    where: { id },
+    include: { author: true, team: true },
+  });
+});
 ```
 
-If another user modified the note since the client last fetched it (version mismatch), zero rows are affected and the API returns `409 Conflict`.
+If another user modified the note since the client last fetched it (version mismatch), `updatedCount.count === 0`, the transaction rolls back, and the API returns `409 Conflict`.
 
 **Why OCC over pessimistic locking?**
-- No held locks → no deadlocks, no lock timeouts
-- Better UX for collaborative editing — conflicts are rare when teams are small, and retry is cheap
-- Stateless — no server-side lock state to manage or clean up
+- **Non-blocking throughput:** No database rows are held in an exclusive lock while awaiting client interaction, eliminating deadlocks and lock timeout bottlenecks.
+- **Collaborative UX:** In small-to-medium teams, conflicting simultaneous writes to the same note are infrequent. When conflicts do occur, the client receives a clear 409 error with instructions to refetch the newest revision and reapply changes.
+- **Stateless:** Zero server-side lock tables or session state to manage or failover.
 
-**Why `$queryRaw` instead of Prisma's typed API?**
-Prisma's `update()` doesn't support conditional `WHERE version = X` — it only filters by the primary key. The atomic check-and-increment must be expressed in raw SQL to avoid a TOCTOU race condition.
+**Why `updateMany` inside a transaction instead of `update`?**
+Prisma's standard `update()` method restricts the `where` clause to `@id` or `@unique` fields. Because `version` is not uniquely indexed on its own, `updateMany` is used with a compound filter `{ id, version }`. Wrapping `updateMany` and `noteRevision.create` in `prisma.$transaction` guarantees that the atomic version increment and the historical snapshot commit together with full ACID isolation.
 
 ### No Authentication Layer
 
