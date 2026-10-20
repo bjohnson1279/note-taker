@@ -92,7 +92,7 @@ describe('Notes API', () => {
 
   // ── GET /notes ──────────────────────────────────────────────────────
 
-  it('should list all notes', async () => {
+  it('should list all notes with pagination metadata', async () => {
     await prisma.note.createMany({
       data: [
         { title: 'A', authorId: userId },
@@ -103,7 +103,10 @@ describe('Notes API', () => {
     const res = await app.inject({ method: 'GET', url: '/notes' });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toHaveLength(2);
+    const body = res.json();
+    expect(body.data).toHaveLength(2);
+    expect(body.pagination.hasMore).toBe(false);
+    expect(body.pagination.limit).toBe(20);
   });
 
   it('should filter notes by authorId', async () => {
@@ -120,8 +123,8 @@ describe('Notes API', () => {
       url: `/notes?authorId=${userId}`,
     });
 
-    expect(res.json()).toHaveLength(1);
-    expect(res.json()[0].title).toBe('Mine');
+    expect(res.json().data).toHaveLength(1);
+    expect(res.json().data[0].title).toBe('Mine');
   });
 
   it('should filter notes by teamId', async () => {
@@ -135,8 +138,86 @@ describe('Notes API', () => {
       url: `/notes?teamId=${teamId}`,
     });
 
-    expect(res.json()).toHaveLength(1);
-    expect(res.json()[0].title).toBe('Team');
+    expect(res.json().data).toHaveLength(1);
+    expect(res.json().data[0].title).toBe('Team');
+  });
+
+  it('should search notes by keyword in title or content (?q=...)', async () => {
+    await prisma.note.create({
+      data: {
+        title: 'Kubernetes Architecture',
+        content: 'Overview of control plane pods',
+        authorId: userId,
+      },
+    });
+    await prisma.note.create({
+      data: {
+        title: 'Lunch Menu',
+        content: 'Tacos on Tuesday',
+        authorId: userId,
+      },
+    });
+
+    // 1. Search matching title
+    const resTitle = await app.inject({
+      method: 'GET',
+      url: '/notes?q=kubernetes',
+    });
+    expect(resTitle.statusCode).toBe(200);
+    expect(resTitle.json().data).toHaveLength(1);
+    expect(resTitle.json().data[0].title).toBe('Kubernetes Architecture');
+
+    // 2. Search matching content
+    const resContent = await app.inject({
+      method: 'GET',
+      url: '/notes?q=tacos',
+    });
+    expect(resContent.statusCode).toBe(200);
+    expect(resContent.json().data).toHaveLength(1);
+    expect(resContent.json().data[0].title).toBe('Lunch Menu');
+
+    // 3. Search with no matches
+    const resEmpty = await app.inject({
+      method: 'GET',
+      url: '/notes?q=nonexistentquery',
+    });
+    expect(resEmpty.statusCode).toBe(200);
+    expect(resEmpty.json().data).toHaveLength(0);
+  });
+
+  it('should paginate notes using limit and cursor', async () => {
+    // Seed 3 notes
+    const n1 = await prisma.note.create({
+      data: { title: 'Page Note 1', authorId: userId },
+    });
+    const n2 = await prisma.note.create({
+      data: { title: 'Page Note 2', authorId: userId },
+    });
+    const n3 = await prisma.note.create({
+      data: { title: 'Page Note 3', authorId: userId },
+    });
+
+    // Page 1: Request limit=2
+    const page1Res = await app.inject({
+      method: 'GET',
+      url: '/notes?limit=2',
+    });
+    expect(page1Res.statusCode).toBe(200);
+    const page1 = page1Res.json();
+    expect(page1.data).toHaveLength(2);
+    expect(page1.pagination.hasMore).toBe(true);
+    expect(page1.pagination.nextCursor).toBeDefined();
+
+    // Page 2: Request limit=2 using cursor from Page 1
+    const page2Res = await app.inject({
+      method: 'GET',
+      url: `/notes?limit=2&cursor=${page1.pagination.nextCursor}`,
+    });
+    expect(page2Res.statusCode).toBe(200);
+    const page2 = page2Res.json();
+    expect(page2.data).toHaveLength(1);
+    expect(page2.pagination.hasMore).toBe(false);
+    expect(page2.pagination.nextCursor).toBeNull();
   });
 
   // ── GET /notes/:id ──────────────────────────────────────────────────

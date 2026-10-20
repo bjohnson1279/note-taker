@@ -24,5 +24,23 @@ export const NoteParams = z.object({
 export const NoteQuerystring = z.object({
   authorId: z.string().uuid().optional(),
   teamId: z.string().uuid().optional(),
+  q: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Full-text keyword search across note title and content'),
+  cursor: z
+    .string()
+    .uuid()
+    .optional()
+    .describe('Pagination cursor (id of the last item in the previous page)'),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(20)
+    .describe('Maximum number of items to return (1-100, default 20)'),
 });
-

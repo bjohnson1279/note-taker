@@ -51,26 +51,64 @@ export async function noteRoutes(app: FastifyInstance) {
     return reply.code(201).send(note);
   });
 
-  // ── LIST NOTES ──────────────────────────────────────────────────────
+  // ── LIST & SEARCH NOTES (with Cursor Pagination) ────────────────────
   server.get('/notes', {
     schema: {
       querystring: NoteQuerystring,
-      description: 'List notes. Optionally filter by authorId and/or teamId.',
+      description:
+        'List or search notes with cursor-based pagination. ' +
+        'Supports keyword search across title and content (?q=) ' +
+        'and filtering by authorId and/or teamId.',
       tags: ['Notes'],
     },
   }, async (request) => {
-    const { authorId, teamId } = request.query;
+    const { authorId, teamId, q, cursor, limit } = request.query;
 
-    // Build a dynamic WHERE clause from the optional query params
-    const where: Record<string, string> = {};
+    // Build dynamic Prisma WHERE clause
+    const where: Record<string, any> = {};
     if (authorId) where.authorId = authorId;
     if (teamId) where.teamId = teamId;
 
-    return prisma.note.findMany({
+    // Keyword search across title and content (case-insensitive)
+    if (q) {
+      where.OR = [
+        { title: { contains: q, mode: 'insensitive' } },
+        { content: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    // Keyset / cursor-based pagination:
+    // Request (limit + 1) items to determine if a subsequent page exists
+    // without executing a costly COUNT(*) table scan.
+    const take = limit;
+    const notes = await prisma.note.findMany({
       where,
-      include: { author: { select: { id: true, email: true, name: true } } },
-      orderBy: { updatedAt: 'desc' },
+      take: take + 1,
+      ...(cursor
+        ? {
+            cursor: { id: cursor },
+            skip: 1, // Skip the cursor itself
+          }
+        : {}),
+      include: {
+        author: { select: { id: true, email: true, name: true } },
+        team: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
     });
+
+    const hasMore = notes.length > take;
+    const items = hasMore ? notes.slice(0, take) : notes;
+    const nextCursor = hasMore ? items[items.length - 1].id : null;
+
+    return {
+      data: items,
+      pagination: {
+        nextCursor,
+        hasMore,
+        limit,
+      },
+    };
   });
 
   // ── GET NOTE BY ID ──────────────────────────────────────────────────

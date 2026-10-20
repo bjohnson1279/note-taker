@@ -19,6 +19,8 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@fastify/cors": "^11.3.1",
+    "@fastify/rate-limit": "^11.2.1",
     "@fastify/swagger": "^9.0.0",
     "@fastify/swagger-ui": "^6.1.2",
     "@prisma/client": "^5.22.0",
