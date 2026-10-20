@@ -101,10 +101,11 @@ The API is live at **http://localhost:3000**. Interactive Swagger docs are at **
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/notes` | Create a note (personal or team-shared) |
-| `GET` | `/notes` | List & search notes (`?authorId=`, `?teamId=`, `?q=`, `?cursor=`, `?limit=`) |
+| `POST` | `/notes` | Create a note (personal or team-shared; supports `tags`) |
+| `GET` | `/notes` | List & search notes (`?authorId=`, `?teamId=`, `?tag=`, `?q=`, `?cursor=`, `?limit=`) |
 | `GET` | `/notes/:id` | Get a note by ID |
-| `PUT` | `/notes/:id` | Update a note (requires `version` for OCC) |
+| `GET` | `/notes/:id/history` | Get immutable revision audit trail for a note |
+| `PUT` | `/notes/:id` | Update a note (OCC versioning + captures revision snapshot) |
 | `DELETE` | `/notes/:id` | Delete a note |
 
 ---
@@ -202,6 +203,19 @@ The `GET /notes?q=...` endpoint performs case-insensitive search across both not
 - Composable with other query scopes (`?teamId=...&q=architecture`).
 - Returns full author and team relationship metadata in the paginated envelope.
 
+### Immutable Revision History & Collaborative Audit Log
+
+Rather than merely incrementing an integer counter for Optimistic Concurrency Control, the API synergizes OCC with full audit tracking:
+- **Zero-drift snapshot creation:** When `PUT /notes/:id` updates a note from version $N$ to $N+1$, the update and the insertion of version $N$ into `note_revisions` occur inside a single atomic database transaction (`prisma.$transaction`).
+- **Audit trail retrieval (`GET /notes/:id/history`):** Returns the chronological history of all prior snapshots, complete with editor attribution (`editorId`), previous title, content, tags, and timestamp.
+- **Enterprise resilience:** Enables future features such as revision rollbacks, point-in-time diffing, and forensic auditability in collaborative team workflows.
+
+### Tags & Native PostgreSQL Array Operations
+
+Notes support flexible classification via a `tags` array:
+- Uses PostgreSQL's native `TEXT[]` array type rather than an expensive relational join table (`note_tags`).
+- Queries with `?tag=security` leverage PostgreSQL's containment operator (`@>`) via Prisma's `{ tags: { has: tag } }` for efficient filtering.
+
 ### Production Hardening & Operational Resilience
 
 - **Rate Limiting (`@fastify/rate-limit`):** Protects endpoints from volumetric DoS and automated brute-force attacks (100 req/min default, configurable via environment, relaxed in test suites).
@@ -211,6 +225,15 @@ The `GET /notes?q=...` endpoint performs case-insensitive search across both not
   2. Allow in-flight requests to finish processing.
   3. Cleanly drain and disconnect Prisma's PostgreSQL connection pool.
   4. Terminate with exit code 0 without abruptly severing active transactions.
+
+### Automated CI/CD Workflow (`.github/workflows/ci.yml`)
+
+A production GitHub Actions workflow runs on every push and pull request to `main`:
+- Spins up a dedicated PostgreSQL 15 service container with health checks.
+- Enforces strict TypeScript typechecking (`npm run typecheck`).
+- Deploys migrations via `prisma migrate deploy`.
+- Executes the full Vitest integration test suite.
+- Builds the multi-stage production Docker image to guarantee container build reproducibility.
 
 ### Production Containerization & Process Lifecycle
 
@@ -235,11 +258,13 @@ docker compose up -d postgres
 npm test
 ```
 
-**What's covered (32 automated integration tests):**
+**What's covered (34 automated integration tests):**
 - Full CRUD lifecycle for Users, Teams, and Notes
 - Team membership management (add, remove, duplicate detection)
 - OCC: successful update, conflict detection (409), and not-found (404)
-- Keyword search across note titles and content (`?q=`)
+- Immutable revision history tracking and history endpoint (`GET /notes/:id/history`)
+- Tagging and PostgreSQL array filtering (`?tag=...`)
+- Keyword search across note titles and content (`?q=...`)
 - Keyset cursor pagination with `limit`, `cursor`, `hasMore`, and `nextCursor`
 - Validation: invalid emails, missing required fields (400)
 - Authorization: non-member cannot create a team note (403)
@@ -251,5 +276,4 @@ npm test
 - **Authentication & authorization middleware** — JWT-based auth with role-based access control (RBAC)
 - **Soft deletes** — `deletedAt` timestamp instead of hard deletes, with restore capability
 - **WebSockets / Server-Sent Events (SSE)** — Real-time live updates when a teammate updates a shared note
-- **CI pipeline** — GitHub Actions for lint, typecheck, and test on every PR
 
