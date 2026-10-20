@@ -3,66 +3,15 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model NoteRevision {
-  id        String   @id @default(uuid())
-  noteId    String   @map("note_id")
-  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
-  title     String
-  content   String
-  tags      String[] @default([])
-  editorId  String?  @map("editor_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
-
-  @@index([noteId])
-  @@index([noteId, version])
-  @@map("note_revisions")
-}
 generator client {
   provider = "prisma-client-js"
 }
 
-model NoteRevision {
-  id        String   @id @default(uuid())
-  noteId    String   @map("note_id")
-  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
-  title     String
-  content   String
-  tags      String[] @default([])
-  editorId  String?  @map("editor_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
-
-  @@index([noteId])
-  @@index([noteId, version])
-  @@map("note_revisions")
-}
 enum TeamRole {
   ADMIN
   MEMBER
 }
 
-model NoteRevision {
-  id        String   @id @default(uuid())
-  noteId    String   @map("note_id")
-  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
-  title     String
-  content   String
-  tags      String[] @default([])
-  editorId  String?  @map("editor_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
-
-  @@index([noteId])
-  @@index([noteId, version])
-  @@map("note_revisions")
-}
 model User {
   id        String       @id @default(uuid())
   email     String       @unique
@@ -77,23 +26,6 @@ model User {
   @@map("users")
 }
 
-model NoteRevision {
-  id        String   @id @default(uuid())
-  noteId    String   @map("note_id")
-  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
-  title     String
-  content   String
-  tags      String[] @default([])
-  editorId  String?  @map("editor_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
-
-  @@index([noteId])
-  @@index([noteId, version])
-  @@map("note_revisions")
-}
 model Team {
   id          String       @id @default(uuid())
   name        String       @unique
@@ -107,23 +39,6 @@ model Team {
   @@map("teams")
 }
 
-model NoteRevision {
-  id        String   @id @default(uuid())
-  noteId    String   @map("note_id")
-  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
-  title     String
-  content   String
-  tags      String[] @default([])
-  editorId  String?  @map("editor_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
-
-  @@index([noteId])
-  @@index([noteId, version])
-  @@map("note_revisions")
-}
 model TeamMember {
   teamId   String   @map("team_id")
   userId   String   @map("user_id")
@@ -137,23 +52,6 @@ model TeamMember {
   @@map("team_members")
 }
 
-model NoteRevision {
-  id        String   @id @default(uuid())
-  noteId    String   @map("note_id")
-  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
-  title     String
-  content   String
-  tags      String[] @default([])
-  editorId  String?  @map("editor_id")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
-  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
-
-  @@index([noteId])
-  @@index([noteId, version])
-  @@map("note_revisions")
-}
 model Note {
   id        String         @id @default(uuid())
   title     String
@@ -191,5 +89,3 @@ model NoteRevision {
   @@index([noteId, version])
   @@map("note_revisions")
 }
-
-
