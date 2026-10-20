@@ -102,7 +102,7 @@ The API is live at **http://localhost:3000**. Interactive Swagger docs are at **
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/notes` | Create a note (personal or team-shared) |
-| `GET` | `/notes` | List notes (filter: `?authorId=`, `?teamId=`) |
+| `GET` | `/notes` | List & search notes (`?authorId=`, `?teamId=`, `?q=`, `?cursor=`, `?limit=`) |
 | `GET` | `/notes/:id` | Get a note by ID |
 | `PUT` | `/notes/:id` | Update a note (requires `version` for OCC) |
 | `DELETE` | `/notes/:id` | Delete a note |
@@ -188,6 +188,30 @@ A note's `teamId` field determines its visibility:
 
 This single-field approach keeps the schema simple. A more complex system might use a separate `note_shares` join table for per-user sharing, but for team-scoped collaboration this is sufficient.
 
+### Keyset (Cursor-based) Pagination vs. Offset Pagination
+
+The `GET /notes` endpoint implements keyset cursor pagination rather than classic `OFFSET/LIMIT`:
+- **Performance at scale:** `OFFSET N` forces the database engine to scan and discard $N$ rows before returning results, degrading query latency from $O(1)$ to $O(N)$ as page numbers increase. Keyset pagination utilizes the indexed `createdAt` / `id` boundary to jump directly to target tuples in $O(1)$ constant time.
+- **Consistency under concurrent mutations:** In high-write collaborative apps, if notes are inserted or deleted while a client navigates pages, offset pagination produces duplicate rows or skipped records ("page drift"). Keyset pagination guarantees that every note is returned exactly once.
+- **Pre-flight count avoidance:** The query requests `limit + 1` records; if an extra record is returned, `hasMore: true` and `nextCursor` are populated without issuing an expensive full-table `COUNT(*)` scan.
+
+### Full-Text Keyword Search (`?q=`)
+
+The `GET /notes?q=...` endpoint performs case-insensitive search across both note `title` and `content`.
+- Matches words or partial terms in titles and markdown bodies.
+- Composable with other query scopes (`?teamId=...&q=architecture`).
+- Returns full author and team relationship metadata in the paginated envelope.
+
+### Production Hardening & Operational Resilience
+
+- **Rate Limiting (`@fastify/rate-limit`):** Protects endpoints from volumetric DoS and automated brute-force attacks (100 req/min default, configurable via environment, relaxed in test suites).
+- **CORS (`@fastify/cors`):** Pre-configured cross-origin headers to support single-page web applications and mobile API consumers.
+- **Graceful Shutdown:** Intercepts `SIGINT` (Ctrl+C) and `SIGTERM` (Docker / Kubernetes container termination signals) to:
+  1. Stop accepting new HTTP connections.
+  2. Allow in-flight requests to finish processing.
+  3. Cleanly drain and disconnect Prisma's PostgreSQL connection pool.
+  4. Terminate with exit code 0 without abruptly severing active transactions.
+
 ### Production Containerization & Process Lifecycle
 
 The Docker packaging is engineered with production operational concerns in mind:
@@ -211,10 +235,12 @@ docker compose up -d postgres
 npm test
 ```
 
-**What's covered:**
+**What's covered (32 automated integration tests):**
 - Full CRUD lifecycle for Users, Teams, and Notes
 - Team membership management (add, remove, duplicate detection)
 - OCC: successful update, conflict detection (409), and not-found (404)
+- Keyword search across note titles and content (`?q=`)
+- Keyset cursor pagination with `limit`, `cursor`, `hasMore`, and `nextCursor`
 - Validation: invalid emails, missing required fields (400)
 - Authorization: non-member cannot create a team note (403)
 
@@ -222,11 +248,8 @@ npm test
 
 ## What I'd Add Given More Time
 
-- **Authentication & authorization middleware** — JWT-based auth with role-based access control
-- **Pagination** — Cursor-based pagination for list endpoints to handle large datasets
-- **Full-text search** — PostgreSQL `tsvector` search on note title and content
+- **Authentication & authorization middleware** — JWT-based auth with role-based access control (RBAC)
 - **Soft deletes** — `deletedAt` timestamp instead of hard deletes, with restore capability
-- **Rate limiting** — `@fastify/rate-limit` to protect against abuse
-- **Request ID tracing** — Correlation IDs propagated through logs for observability
+- **WebSockets / Server-Sent Events (SSE)** — Real-time live updates when a teammate updates a shared note
 - **CI pipeline** — GitHub Actions for lint, typecheck, and test on every PR
 
