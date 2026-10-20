@@ -1,0 +1,70 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum TeamRole {
+  ADMIN
+  MEMBER
+}
+
+model User {
+  id        String       @id @default(uuid())
+  email     String       @unique
+  name      String
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  teams     TeamMember[]
+  notes     Note[]
+
+  @@map("users")
+}
+
+model Team {
+  id          String       @id @default(uuid())
+  name        String       @unique
+  description String?
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  members     TeamMember[]
+  notes       Note[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  teamId   String   @map("team_id")
+  userId   String   @map("user_id")
+  role     TeamRole @default(MEMBER)
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  team     Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([teamId, userId])
+  @@map("team_members")
+}
+
+model Note {
+  id        String   @id @default(uuid())
+  title     String
+  content   String   @default("")
+  authorId  String   @map("author_id")
+  teamId    String?  @map("team_id") // Null = Personal note, NOT NULL = Shared team note
+  version   Int      @default(1)    // Required for Optimistic Concurrency Control
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  team      Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  @@index([authorId])
+  @@index([teamId])
+  @@map("notes")
+}
