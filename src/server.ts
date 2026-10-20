@@ -1,4 +1,4 @@
-import { buildServer } from './app';
+import { buildServer } from './app.js';
 
 // ── Entry Point ───────────────────────────────────────────────────────
 // Separated from the app factory (app.ts) so that test suites can import

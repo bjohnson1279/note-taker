@@ -1,7 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { ZodTypeProvider } from 'fastify-type-provider-zod';
-import { CreateUserBody, UserParams } from '../schemas/user.schemas';
-import { prisma } from '../lib/prisma';
+import { CreateUserBody, UserParams } from '../schemas/user.schemas.js';
+import { prisma } from '../lib/prisma.js';
 
 export async function userRoutes(app: FastifyInstance) {
   const server = app.withTypeProvider<ZodTypeProvider>();

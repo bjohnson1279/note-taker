@@ -5,8 +5,8 @@ import {
   TeamParams,
   AddMemberBody,
   RemoveMemberParams,
-} from '../schemas/team.schemas';
-import { prisma } from '../lib/prisma';
+} from '../schemas/team.schemas.js';
+import { prisma } from '../lib/prisma.js';
 
 export async function teamRoutes(app: FastifyInstance) {
   const server = app.withTypeProvider<ZodTypeProvider>();

@@ -5,8 +5,8 @@ import {
   UpdateNoteBody,
   NoteParams,
   NoteQuerystring,
-} from '../schemas/note.schemas';
-import { prisma } from '../lib/prisma';
+} from '../schemas/note.schemas.js';
+import { prisma } from '../lib/prisma.js';
 
 export async function noteRoutes(app: FastifyInstance) {
   const server = app.withTypeProvider<ZodTypeProvider>();

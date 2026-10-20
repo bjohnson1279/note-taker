@@ -2,9 +2,9 @@ import Fastify from 'fastify';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
-import { noteRoutes } from './routes/notes.routes';
-import { userRoutes } from './routes/users.routes';
-import { teamRoutes } from './routes/teams.routes';
+import { noteRoutes } from './routes/notes.routes.js';
+import { userRoutes } from './routes/users.routes.js';
+import { teamRoutes } from './routes/teams.routes.js';
 
 /**
  * Application factory — separated from the startup entry point so that

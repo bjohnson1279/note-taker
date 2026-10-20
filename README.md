@@ -22,24 +22,47 @@ Built as part of the **Bluestaq Senior Staff Software Engineer** assessment.
 
 ## Quick Start
 
-> **Prerequisites:** Node.js ≥ 18, Docker
+> **Prerequisites:** Docker (or Node.js ≥ 20 if running outside Docker).
+
+You can run the entire stack containerized with one command, or run PostgreSQL in Docker while developing locally on your host.
+
+### Option A: 🐳 One-Command Full Docker Stack (Recommended for Review)
+
+No local Node.js or PostgreSQL installation required:
 
 ```bash
-# 1. Clone and enter the project
+# 1. Clone and enter the repository
 git clone https://github.com/bjohnson1279/note-taker.git
 cd note-taker
 
 # 2. Configure environment
 cp .env.example .env
 
-# 3. Start PostgreSQL
-docker compose up -d
+# 3. Build and launch PostgreSQL + API (auto-runs migrations on startup)
+docker compose up --build
 
-# 4. Install dependencies and run migrations
+# 4. (Optional, in another terminal) Seed realistic demo data into the running container
+docker compose exec app npm run seed
+```
+
+The API is live at **http://localhost:3000**. Interactive Swagger docs are at **http://localhost:3000/docs**.
+
+---
+
+### Option B: 💻 Local Node.js Development
+
+```bash
+# 1. Start only PostgreSQL via Docker
+docker compose up -d postgres
+
+# 2. Install dependencies and run migrations
 npm install
 npx prisma migrate dev
 
-# 5. Start the dev server
+# 3. (Optional) Seed realistic demo data
+npm run seed
+
+# 4. Start the dev server with hot reload
 npm run dev
 ```
 
@@ -165,6 +188,15 @@ A note's `teamId` field determines its visibility:
 
 This single-field approach keeps the schema simple. A more complex system might use a separate `note_shares` join table for per-user sharing, but for team-scoped collaboration this is sufficient.
 
+### Production Containerization & Process Lifecycle
+
+The Docker packaging is engineered with production operational concerns in mind:
+- **Multi-stage build:** Separates the build toolchain (`builder`) from the lean runtime container (`runner`), keeping image size minimal and attack surface small.
+- **Process supervision:** Uses `dumb-init` as PID 1 to ensure standard POSIX signal handling (`SIGTERM`/`SIGINT`) properly propagates to Node.js for clean teardown and prevents zombie process leaks.
+- **Principle of Least Privilege:** Drops root privileges inside the container, executing the API runtime under the unprivileged `USER node`.
+- **Zero-drift startup entrypoint:** `docker-entrypoint.sh` automatically runs `npx prisma migrate deploy` before serving traffic, guaranteeing schema synchronization before HTTP requests arrive.
+- **Active Container Healthcheck:** Docker-native `HEALTHCHECK` queries Fastify's `/health` endpoint over IPv4 loopback (`127.0.0.1`) to integrate seamlessly with container orchestrators.
+
 ---
 
 ## Testing
@@ -173,30 +205,11 @@ Tests are integration tests that exercise the full Fastify → Prisma → Postgr
 
 ```bash
 # Ensure PostgreSQL is running
-docker compose up -d
+docker compose up -d postgres
 
 # Run all tests
 npm test
 ```
-
-**What's covered:**
-- Full CRUD lifecycle for Users, Teams, and Notes
-- Team membership management (add, remove, duplicate detection)
-- OCC: successful update, conflict detection (409), and not-found (404)
-- Validation: invalid emails, missing required fields (400)
-- Authorization: non-member cannot create a team note (403)
-
----
-
-## What I'd Add Given More Time
-
-- **Authentication & authorization middleware** — JWT-based auth with role-based access control
-- **Pagination** — Cursor-based pagination for list endpoints to handle large datasets
-- **Full-text search** — PostgreSQL `tsvector` search on note title and content
-- **Soft deletes** — `deletedAt` timestamp instead of hard deletes, with restore capability
-- **Rate limiting** — `@fastify/rate-limit` to protect against abuse
-- **Request ID tracing** — Correlation IDs propagated through logs for observability
-- **CI pipeline** — GitHub Actions for lint, typecheck, and test on every PR
 
 **What's covered:**
 - Full CRUD lifecycle for Users, Teams, and Notes
