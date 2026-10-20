@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from 'vitest';
-import { buildServer } from '../src/app';
-import { prisma } from '../src/lib/prisma';
+import { buildServer } from '../src/app.js';
+import { prisma } from '../src/lib/prisma.js';
 import { FastifyInstance } from 'fastify';
 
 describe('Notes API', () => {
@@ -14,6 +14,7 @@ describe('Notes API', () => {
   });
 
   beforeEach(async () => {
+    await prisma.noteRevision.deleteMany();
     await prisma.note.deleteMany();
     await prisma.teamMember.deleteMany();
     await prisma.team.deleteMany();
@@ -42,13 +43,19 @@ describe('Notes API', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/notes',
-      payload: { title: 'My Note', content: 'Private thoughts', authorId: userId },
+      payload: {
+        title: 'My Note',
+        content: 'Private thoughts',
+        tags: ['personal', 'draft'],
+        authorId: userId,
+      },
     });
 
     expect(res.statusCode).toBe(201);
     const body = res.json();
     expect(body.title).toBe('My Note');
     expect(body.teamId).toBeNull();
+    expect(body.tags).toEqual(['personal', 'draft']);
     expect(body.version).toBe(1);
   });
 
@@ -140,6 +147,24 @@ describe('Notes API', () => {
 
     expect(res.json().data).toHaveLength(1);
     expect(res.json().data[0].title).toBe('Team');
+  });
+
+  it('should filter notes by tag (?tag=...)', async () => {
+    await prisma.note.create({
+      data: { title: 'Security RFC', tags: ['security', 'rfc'], authorId: userId },
+    });
+    await prisma.note.create({
+      data: { title: 'Frontend Plan', tags: ['frontend'], authorId: userId },
+    });
+
+    const res = await app.inject({
+      method: 'GET',
+      url: '/notes?tag=security',
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().data).toHaveLength(1);
+    expect(res.json().data[0].title).toBe('Security RFC');
   });
 
   it('should search notes by keyword in title or content (?q=...)', async () => {
@@ -244,21 +269,47 @@ describe('Notes API', () => {
     expect(res.statusCode).toBe(404);
   });
 
-  // ── PUT /notes/:id — Optimistic Concurrency Control ─────────────────
+  // ── PUT /notes/:id — OCC & Revision Tracking ────────────────────────
 
-  it('should update a note when the correct version is provided', async () => {
+  it('should update a note and create a revision snapshot in history', async () => {
     const note = await prisma.note.create({
-      data: { title: 'Original', content: 'Old', authorId: userId, version: 1 },
+      data: {
+        title: 'Original Title',
+        content: 'Original Content',
+        tags: ['v1'],
+        authorId: userId,
+        version: 1,
+      },
     });
 
     const res = await app.inject({
       method: 'PUT',
       url: `/notes/${note.id}`,
-      payload: { title: 'Updated', version: 1 },
+      payload: {
+        title: 'Updated Title',
+        content: 'Updated Content',
+        tags: ['v2', 'reviewed'],
+        version: 1,
+      },
     });
 
     expect(res.statusCode).toBe(200);
     expect(res.json().data.version).toBe(2);
+    expect(res.json().data.tags).toEqual(['v2', 'reviewed']);
+
+    // Verify history endpoint
+    const historyRes = await app.inject({
+      method: 'GET',
+      url: `/notes/${note.id}/history`,
+    });
+
+    expect(historyRes.statusCode).toBe(200);
+    const history = historyRes.json();
+    expect(history.currentVersion).toBe(2);
+    expect(history.revisions).toHaveLength(1);
+    expect(history.revisions[0].version).toBe(1);
+    expect(history.revisions[0].title).toBe('Original Title');
+    expect(history.revisions[0].content).toBe('Original Content');
   });
 
   it('should return 409 Conflict when a stale version is provided', async () => {
@@ -288,6 +339,15 @@ describe('Notes API', () => {
       method: 'PUT',
       url: '/notes/00000000-0000-0000-0000-000000000000',
       payload: { title: 'Ghost', version: 1 },
+    });
+
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('should return 404 for history of non-existent note', async () => {
+    const res = await app.inject({
+      method: 'GET',
+      url: '/notes/00000000-0000-0000-0000-000000000000/history',
     });
 
     expect(res.statusCode).toBe(404);

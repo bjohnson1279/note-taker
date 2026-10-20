@@ -21,6 +21,7 @@ model User {
 
   teams     TeamMember[]
   notes     Note[]
+  revisions NoteRevision[]
 
   @@map("users")
 }
@@ -52,19 +53,58 @@ model TeamMember {
 }
 
 model Note {
-  id        String   @id @default(uuid())
+  id        String         @id @default(uuid())
   title     String
-  content   String   @default("")
-  authorId  String   @map("author_id")
-  teamId    String?  @map("team_id") // Null = Personal note, NOT NULL = Shared team note
-  version   Int      @default(1)    // Required for Optimistic Concurrency Control
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  content   String         @default("")
+  tags      String[]       @default([])
+  authorId  String         @map("author_id")
+  teamId    String?        @map("team_id") // Null = Personal note, NOT NULL = Shared team note
+  version   Int            @default(1)    // Required for Optimistic Concurrency Control
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
 
-  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  team      Team?    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  author    User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  team      Team?          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  revisions NoteRevision[]
 
   @@index([authorId])
   @@index([teamId])
   @@map("notes")
 }
+
+model NoteRevision {
+  id        String   @id @default(uuid())
+  noteId    String   @map("note_id")
+  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
+  title     String
+  content   String
+  tags      String[] @default([])
+  editorId  String?  @map("editor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
+
+  @@index([noteId])
+  @@index([noteId, version])
+  @@map("note_revisions")
+}
+
+model NoteRevision {
+  id        String   @id @default(uuid())
+  noteId    String   @map("note_id")
+  version   Int      // Snapshot version number (e.g. 1, 2, 3...)
+  title     String
+  content   String
+  tags      String[] @default([])
+  editorId  String?  @map("editor_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  editor    User?    @relation(fields: [editorId], references: [id], onDelete: SetNull)
+
+  @@index([noteId])
+  @@index([noteId, version])
+  @@map("note_revisions")
+}
+

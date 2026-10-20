@@ -79,7 +79,8 @@ async function main() {
   console.log(`  ✔ Memberships: ${memberships.length} team-member links`);
 
   // ── Notes ───────────────────────────────────────────────────────────
-  // Delete existing seeded notes so we can re-seed cleanly
+  // Clean existing seeded notes and revisions
+  await prisma.noteRevision.deleteMany({});
   await prisma.note.deleteMany({
     where: {
       title: {
@@ -95,7 +96,7 @@ async function main() {
     },
   });
 
-  const notes = await Promise.all([
+  const [note1, note2, note3, note4, note5, note6] = await Promise.all([
     // Team notes — shared with Backend Engineering
     prisma.note.create({
       data: {
@@ -111,6 +112,7 @@ async function main() {
           '',
           '> "APIs are like user interfaces — except your users are developers."',
         ].join('\n'),
+        tags: ['api', 'architecture', 'rest'],
         authorId: alice.id,
         teamId: backend.id,
       },
@@ -125,12 +127,14 @@ async function main() {
           '- Swagger docs auto-generation saved hours of documentation work',
           '',
           '### What to improve',
-          '- [ ] Add cursor-based pagination before the data grows',
-          '- [ ] Set up full-text search on notes (PostgreSQL tsvector)',
-          '- [ ] Add rate limiting to public endpoints',
+          '- [x] Add cursor-based pagination before the data grows',
+          '- [x] Set up full-text search on notes',
+          '- [x] Add rate limiting and revision tracking',
         ].join('\n'),
+        tags: ['agile', 'retro', 'engineering'],
         authorId: bob.id,
         teamId: backend.id,
+        version: 2, // Simulating an updated note
       },
     }),
 
@@ -150,6 +154,7 @@ async function main() {
           '- Columns with low cardinality (boolean flags)',
           '- Tables with heavy INSERT/UPDATE workloads (index maintenance cost)',
         ].join('\n'),
+        tags: ['database', 'postgresql', 'performance'],
         authorId: carol.id,
         teamId: backend.id,
       },
@@ -167,8 +172,8 @@ async function main() {
           '- [ ] Build a toy Raft consensus implementation',
           '- [ ] Practice system design interviews',
         ].join('\n'),
+        tags: ['career', 'learning', 'distributed-systems'],
         authorId: alice.id,
-        // teamId is null → personal note
       },
     }),
 
@@ -191,6 +196,7 @@ async function main() {
           '3. Identify blast radius and affected customers',
           '4. Communicate status to stakeholders every 30 minutes',
         ].join('\n'),
+        tags: ['security', 'devops', 'incident-response'],
         authorId: carol.id,
         teamId: platform.id,
       },
@@ -212,13 +218,27 @@ async function main() {
           '- OPA/Gatekeeper policies for Kubernetes admission control',
           '- Network policies to restrict pod-to-pod communication',
         ].join('\n'),
+        tags: ['security', 'zero-trust', 'networking'],
         authorId: dave.id,
         teamId: platform.id,
       },
     }),
   ]);
 
-  console.log(`  ✔ Notes: ${notes.length} (${notes.filter(n => n.teamId).length} team-shared, ${notes.filter(n => !n.teamId).length} personal)`);
+  // Seed a prior revision snapshot for note2 (Sprint Retro Action Items)
+  await prisma.noteRevision.create({
+    data: {
+      noteId: note2.id,
+      version: 1,
+      title: 'Sprint Retro Action Items',
+      content: '### Initial draft of sprint retro items',
+      tags: ['agile', 'retro'],
+      editorId: bob.id,
+    },
+  });
+
+  console.log(`  ✔ Notes: 6 (5 team-shared, 1 personal)`);
+  console.log(`  ✔ Revision History: Snapshot seeded for note "${note2.title}"`);
 
   // ── Summary ─────────────────────────────────────────────────────────
   console.log('\n✅ Seed complete!\n');
@@ -226,8 +246,9 @@ async function main() {
   console.log('  GET  http://localhost:3000/users');
   console.log('  GET  http://localhost:3000/teams');
   console.log('  GET  http://localhost:3000/notes');
-  console.log(`  GET  http://localhost:3000/notes?authorId=${alice.id}`);
-  console.log(`  GET  http://localhost:3000/notes?teamId=${backend.id}`);
+  console.log('  GET  http://localhost:3000/notes?tag=security');
+  console.log('  GET  http://localhost:3000/notes?q=principles');
+  console.log(`  GET  http://localhost:3000/notes/${note2.id}/history`);
   console.log('  GET  http://localhost:3000/docs        ← Swagger UI');
 }
 
@@ -239,4 +260,3 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
-

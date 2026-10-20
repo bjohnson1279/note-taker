@@ -12,6 +12,7 @@ describe('Users API', () => {
   });
 
   beforeEach(async () => {
+    await prisma.noteRevision.deleteMany();
     await prisma.note.deleteMany();
     await prisma.teamMember.deleteMany();
     await prisma.team.deleteMany();
