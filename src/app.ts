@@ -1,9 +1,11 @@
 import Fastify from 'fastify';
+import { randomUUID } from 'node:crypto';
 import { serializerCompiler, validatorCompiler } from 'fastify-type-provider-zod';
 import fastifySwagger from '@fastify/swagger';
 import fastifySwaggerUi from '@fastify/swagger-ui';
 import fastifyCors from '@fastify/cors';
 import fastifyRateLimit from '@fastify/rate-limit';
+import { prisma } from './lib/prisma.js';
 import { noteRoutes } from './routes/notes.routes.js';
 import { userRoutes } from './routes/users.routes.js';
 import { teamRoutes } from './routes/teams.routes.js';
@@ -15,6 +17,20 @@ import { teamRoutes } from './routes/teams.routes.js';
 export async function buildServer() {
   const app = Fastify({
     logger: process.env.NODE_ENV === 'test' ? false : true,
+    // Adopt incoming X-Request-Id from API gateways / service mesh or generate a cryptographically strong UUID
+    genReqId: (req) => {
+      const incomingId = req.headers['x-request-id'];
+      if (typeof incomingId === 'string' && incomingId.length > 0) {
+        return incomingId;
+      }
+      return randomUUID();
+    },
+  });
+
+  // ── Distributed Tracing & Correlation ───────────────────────────────
+  // Echo the request correlation ID back on all HTTP responses for end-to-end observability
+  app.addHook('onSend', async (request, reply) => {
+    reply.header('X-Request-Id', request.id);
   });
 
   // ── Validation & Serialization ──────────────────────────────────────
@@ -28,6 +44,7 @@ export async function buildServer() {
   await app.register(fastifyCors, {
     origin: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    exposedHeaders: ['X-Request-Id'],
   });
 
   // 2. Rate Limiting: Mitigate brute-force & volumetric DoS attacks
@@ -52,10 +69,38 @@ export async function buildServer() {
     routePrefix: '/docs',
   });
 
-  // ── Health Check ────────────────────────────────────────────────────
+  // ── Cloud-Native Health Probes ──────────────────────────────────────
+  // Liveness probe: verifies process execution and event loop health
   app.get('/health', {
-    schema: { description: 'Liveness probe', tags: ['System'] },
-  }, async () => ({ status: 'ok' }));
+    schema: { description: 'Liveness probe (process health)', tags: ['System'] },
+  }, async () => ({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+  }));
+
+  // Readiness probe: verifies downstream database dependency reachability
+  app.get('/health/ready', {
+    schema: {
+      description: 'Readiness probe verifying database connectivity',
+      tags: ['System'],
+    },
+  }, async (request, reply) => {
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      return {
+        status: 'ready',
+        database: 'connected',
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      request.log.error(error);
+      return reply.code(503).send({
+        status: 'not_ready',
+        database: 'disconnected',
+        timestamp: new Date().toISOString(),
+      });
+    }
+  });
 
   // ── Domain Routes ───────────────────────────────────────────────────
   await app.register(userRoutes);

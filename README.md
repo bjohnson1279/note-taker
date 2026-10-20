@@ -76,7 +76,8 @@ The API is live at **http://localhost:3000**. Interactive Swagger docs are at **
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/health` | Liveness probe |
+| `GET` | `/health` | Liveness probe (process execution & event loop) |
+| `GET` | `/health/ready` | Readiness probe (verifies database connectivity) |
 | `GET` | `/docs` | Interactive Swagger UI |
 
 ### Users
@@ -136,7 +137,8 @@ The API is live at **http://localhost:3000**. Interactive Swagger docs are at **
 ├── tests/
 │   ├── users.test.ts   # User endpoint integration tests
 │   ├── teams.test.ts   # Team endpoint integration tests
-│   └── notes.test.ts   # Note CRUD, search, pagination & OCC tests
+│   ├── notes.test.ts   # Note CRUD, search, pagination & OCC tests
+│   └── system.test.ts  # Health probes and correlation ID tests
 ├── Dockerfile          # Multi-stage production container build
 ├── docker-compose.yml  # Multi-container orchestration (PostgreSQL + API)
 └── docker-entrypoint.sh# Container startup migration runner
@@ -257,6 +259,10 @@ Notes support flexible classification via a `tags` array:
 
 ### Production Hardening & Operational Resilience
 
+- **Distributed Tracing & Request Correlation (`X-Request-Id`):** Fastify's `genReqId` inspects incoming HTTP headers for correlation IDs passed from an API gateway or ingress proxy. If missing, it generates a cryptographically random UUID via `node:crypto`. Fastify's `onSend` hook automatically echoes `X-Request-Id` on all HTTP responses and exposes it via CORS (`exposedHeaders`), enabling seamless distributed tracing across microservices.
+- **Cloud-Native Dual Health Probes:** Separates process liveness from downstream dependency readiness:
+  - **Liveness (`GET /health`):** Verifies that the Node.js process and event loop are responsive.
+  - **Readiness (`GET /health/ready`):** Actively validates downstream PostgreSQL database connectivity (`SELECT 1`). Returns `503 Service Unavailable` if the database is unreachable, instructing ingress controllers to route traffic away without prematurely terminating the container.
 - **Rate Limiting (`@fastify/rate-limit`):** Protects endpoints from volumetric DoS and automated brute-force attacks (100 req/min default, configurable via environment, relaxed in test suites).
 - **CORS (`@fastify/cors`):** Pre-configured cross-origin headers to support single-page web applications and mobile API consumers.
 - **Graceful Shutdown:** Intercepts `SIGINT` (Ctrl+C) and `SIGTERM` (Docker / Kubernetes container termination signals) to:
@@ -297,7 +303,7 @@ docker compose up -d postgres
 npm test
 ```
 
-**What's covered (34 automated integration tests):**
+**What's covered (38 automated integration tests):**
 - Full CRUD lifecycle for Users, Teams, and Notes
 - Team membership management (add, remove, duplicate detection)
 - OCC: successful update, conflict detection (409), and not-found (404)
@@ -307,6 +313,7 @@ npm test
 - Keyset cursor pagination with `limit`, `cursor`, `hasMore`, and `nextCursor`
 - Validation: invalid emails, missing required fields (400)
 - Authorization: non-member cannot create a team note (403)
+- System observability: liveness probe (`/health`), readiness probe (`/health/ready`), and correlation ID propagation (`X-Request-Id`)
 
 ---
 
