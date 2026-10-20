@@ -78,3 +78,9 @@ build/Release
 # Docker volumes / local database data storage
 docker-data/
 postgres_data/
+
+# Prisma Installed Skills
+.agents/skills/
+.claude/skills/
+.cursor/skills/
+.devin/skills/
